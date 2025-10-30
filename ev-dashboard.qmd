@@ -2,4 +2,454 @@
 title: "EV Power Dashboard"
 format: dashboard
 ---
+## Part 0: libraries
+```{r}
+library(tidyverse)
+library(sf)
+library(sf)
+library(leaflet)
+library(tigris)
+library(scales)
+library(plotly)
+```
+
+
+
+## Part 1
+### load the data
+
+```{r}
+setwd("D:/周子寒/Berkeley/Stat 133/Labs/ev-power-lucasz8300-create")
+
+# Read the renewable energy files
+renew_2021 <- read.csv("data/renew-use-2021.csv")
+renew_2022 <- read.csv("data/renew-use-2022.csv")
+renew_2023 <- read.csv("data/renew-use-2023.csv")
+
+# Read the average energy price file
+avg_price <- read.csv("data/av-energy-price-2021-2023.csv")
+
+# Read the total energy use files
+total_use_2021 <- read.csv("data/total-use-2021.csv")
+total_use_2022 <- read.csv("data/total-use-2022.csv")
+total_use_2023 <- read.csv("data/total-use-2023.csv")
+
+# Read the EV registrations file
+ev_registrations <- read.csv("data/ev-registrations-by-state-2023.csv")
+```
+
+### data cleaning
+```{r}
+## clean av-energy-price
+
+cleaned_avg_price <- avg_price |>
+  # Step 1: Remove the top two junk rows
+  slice(-c(1, 2)) |>
+  # Step 2: Separate the single column into four new columns at each comma
+  separate(
+    col = Total.energy.average.price..dollars.per.million.Btu...,
+    into = c("State", "Price_2021", "Price_2022", "Price_2023"),
+    sep = ","
+  )
+# Step 3: Use stringr to make it better
+cleaned_avg_price <- cleaned_avg_price |>
+  mutate(
+    `2021` = str_extract(Price_2021, "\\d+\\.\\d+"),
+    `2022` = str_extract(Price_2021, "\\d+\\.\\d+"),
+    `2023` = str_extract(Price_2021, "\\d+\\.\\d+"),
+    State_abb = State
+  ) |>
+  select(State_abb, `2021`, `2022`, `2023`) |>
+  mutate(
+    State = state.name[match(State_abb, state.abb)],
+    State = if_else(State_abb == "DC", "District of Columbia", State)
+  )
+
+
+head(cleaned_avg_price)
+
+
+## clean data in ev_registration
+cleaned_ev_registrations <- ev_registrations |>
+  slice(-c(1, 2)) |>
+  mutate(
+    count = str_extract(X, "\\d+"),
+    State = electric.vehicle.registrations_by_state..2023.,
+    State_abb = state.abb[match(State, state.name)],
+    State_abb = if_else(State == "District of Columbia", "DC" , State_abb)
+  ) |>
+  select(State, State_abb, count)
+head(cleaned_ev_registrations)
+
+
+## clean data in renew
+cleaned_renew_2021 <- renew_2021 |>
+  mutate(
+    Price_2021 = str_extract(Renewable_Use_2021, "\\d+"),
+    Source = as.factor(Energy_Source),
+     State_abb = toupper(State)
+    
+  ) |>
+  select(State_abb, Source, Price_2021)
+head(cleaned_renew_2021)
+
+cleaned_renew_2022 <- renew_2022 |>
+  mutate(
+    Price_2022 = str_extract(Renewable_Use_2022, "\\d+"),
+    Source = as.factor(Energy_Source),
+    State_abb =toupper(State)
+  ) |>
+  select(State_abb, Source, Price_2022)
+head(cleaned_renew_2022)
+
+cleaned_renew_2023 <- renew_2023 |>
+  mutate(
+    Price_2023 = str_extract(Renewable_Use_2023, "\\d+"),
+    Source = as.factor(Energy_Source),
+    State_abb = toupper(State)
+  ) |>
+  select(State_abb, Source, Price_2023)
+head(cleaned_renew_2023)
+
+
+## clean data in total_use
+cleaned_total_use_2021 <- total_use_2021 |>
+  mutate(
+    Energy_Source = recode(Energy_Source,
+      "Coal"                     = "Coal",
+      "Natural Gas†"             = "Natural_Gas",
+      "Petroleum (BTU)"          = "Petroleum",
+      "nuclear"                  = "Nuclear",
+      "total_renewable_energy"   = "Total_Renewables"
+    ),
+    Energy_Source = factor(Energy_Source, 
+      levels = c("Coal", "Natural_Gas", "Petroleum", "Nuclear", "Total_Renewables")
+    )
+  ) |>
+  pivot_longer(
+    cols = AK:US,
+    names_to = "State_abb",
+    values_to = "Price_2021"
+      )
+head(cleaned_total_use_2021)
+
+cleaned_total_use_2022 <- total_use_2022 |>
+  mutate(
+    # Step 1: Recode the messy values to clean, consistent names
+    Energy_Source = recode(Energy_Source,
+      "coal Consumption"   = "Coal",
+      "Natural-Gas"        = "Natural_Gas",
+      "petroleum (btu)"    = "Petroleum",
+      "Nuclear Energy†"    = "Nuclear",
+      "total_renewables"   = "Total_Renewables"
+    ),
+    # Step 2: Convert the column to a factor with a specific order
+    Energy_Source = factor(Energy_Source, 
+      levels = c("Coal", "Natural_Gas", "Petroleum", "Nuclear", "Total_Renewables")
+    )
+  ) |>
+  pivot_longer(
+    cols = AK:US,
+    names_to = "State_abb",
+    values_to = "Price_2022"
+      )
+head(cleaned_total_use_2022)
+
+cleaned_total_use_2023 <- total_use_2023 |>
+  mutate(
+    # Step 1: Recode the messy values to clean, consistent names
+    Energy_Source = recode(Energy_Source,
+      "coal_usage"              = "Coal",
+      "NaturalGas"              = "Natural_Gas",
+      "petroleum (BTU)"         = "Petroleum",
+      "nuclear-energy †"        = "Nuclear",
+      "total renewable-energy"  = "Total_Renewables"
+    ),
+    # Step 2: Convert the column to a factor with a specific order
+    Energy_Source = factor(Energy_Source, 
+      levels = c("Coal", "Natural_Gas", "Petroleum", "Nuclear", "Total_Renewables")
+    )
+  )|>
+  
+  pivot_longer(
+    cols = AK:US,
+    names_to = "State_abb",
+    values_to = "Price_2023"
+      )
+head(cleaned_total_use_2023)
+
+```
+
+
+## Part 2: Data Visualization
+### How has the share of renewable energy changed from 2021–2023 across states
+```{r}
+q1 <- full_join(cleaned_renew_2021, cleaned_renew_2022,by = c("State_abb", "Source"))
+q1 <- full_join(cleaned_renew_2023, q1 ,by = c("State_abb", "Source"))
+head(q1)
+
+analysis_q1 <- q1 |>
+  pivot_longer(
+    cols = starts_with("Price_"),  
+    names_to = "Year",             
+    values_to = "Energy_Amount"    
+  ) |>
+  mutate(
+    Year = as.numeric(str_remove(Year, "Price_")), 
+    Energy_Amount = as.numeric(Energy_Amount) 
+  ) |>
+  group_by(State_abb, Year) %>% 
+  mutate(
+    Total_Energy_Per_Year = sum(Energy_Amount, na.rm = TRUE),
+    Share = Energy_Amount / Total_Energy_Per_Year
+  ) |>
+  ungroup() 
+
+head(analysis_q1)
+
+
+analysis_q1 |>
+  ggplot(aes(x = Year, y = Share, fill = Source)) +
+  geom_col() +
+  labs(
+    title = "Change in Renewable Energy Share Across States (2021-2023)",
+    subtitle = "Each panel represents a different state",
+    x = "Year",
+    y = "Share of Total Renewable Energy",
+    fill = "Energy Source"
+  ) +
+  theme_minimal() +
+  facet_wrap(~ State_abb)
+
+
+# 1. GET MAP DATA
+# Download the shapes of the US states for plotting
+states_sf <- states(cb = TRUE) %>% 
+  st_transform(4326) # Use a standard projection for web maps
+
+# 2. PREPARE POP-UP DATA
+# This part takes your 'analysis_q1' frame and creates the HTML text for the pop-ups
+popup_data <- analysis_q1 %>%
+  # Format the 'Share' column into a clean percentage label
+  mutate(Share_Label = paste0(Source, ": ", percent(Share, accuracy = 0.1))) %>%
+  # Group by state and year to combine all sources into one summary string
+  group_by(State_abb, Year) %>%
+  summarise(Yearly_Summary = paste(Share_Label, collapse = "<br>"), .groups = 'drop') %>%
+  # Pivot the data so we can easily access each year's summary
+  pivot_wider(names_from = Year, values_from = Yearly_Summary, names_prefix = "Year_") %>%
+  # Create the final, clean HTML content for the pop-up window
+  mutate(
+    Popup_Content = paste(
+      "<strong>State: ", State_abb, "</strong><br><hr>",
+      "<strong>2023 Shares:</strong><br>", Year_2023, "<br><br>",
+      "<strong>2022 Shares:</strong><br>", Year_2022, "<br><br>",
+      "<strong>2021 Shares:</strong><br>", Year_2021
+    )
+  )
+
+# 3. JOIN DATA AND CREATE MAP
+# Join your energy data to the map shapes
+map_data <- states_sf %>%
+  left_join(popup_data, by = c("STUSPS" = "State_abb"))
+
+# Build and display the interactive leaflet map!
+leaflet(map_data) %>%
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  setView(lng = -98.5, lat = 39.8, zoom = 4) %>%
+  addPolygons(
+    fillColor = "#0072B2", # A nice blue color
+    weight = 1,
+    color = "white",
+    fillOpacity = 0.7,
+    # Add a highlight effect when you hover over a state
+    highlightOptions = highlightOptions(
+      weight = 3,
+      color = "black",
+      bringToFront = TRUE
+    ),
+    # Use the 'Popup_Content' column we created for the pop-up text
+    popup = ~Popup_Content
+  )
+
+
+
+```
+
+### What is the share of electricity that comes from clean sources by state?
+```{r}
+q2 <- full_join(cleaned_total_use_2021, cleaned_total_use_2022, by=c("State_abb", "Energy_Source"))
+q2 <- full_join(q2, cleaned_total_use_2023, by=c("State_abb", "Energy_Source"))
+
+
+analysis_q2 <- q2 |>
+  pivot_longer(
+    cols = starts_with("Price_"),  
+    names_to = "Year",             
+    values_to = "Energy_Amount"    
+  ) |>
+  mutate(
+    Year = as.numeric(str_remove(Year, "Price_")), 
+    Energy_Amount = as.numeric(Energy_Amount) 
+  ) |>
+  group_by(State_abb, Year) |>
+  mutate(
+    Total_Energy_Per_Year = sum(Energy_Amount, na.rm = TRUE),
+    Share = Energy_Amount / Total_Energy_Per_Year
+  ) |>
+  ungroup() |>
+  filter(Energy_Source == "Total_Renewables")
+
+head(analysis_q2)
+
+
+
+analysis_q2 |>
+  mutate(State_abb = fct_reorder(State_abb, ifelse(Year == 2023, Share, 0), .desc = TRUE)) |>
+  ggplot(aes(x = State_abb, y = Share, fill = factor(Year))) +
+  geom_col(position = "dodge") +
+  labs(
+    title = "Share of Electricity From Clean Sources by State",
+    subtitle = "States are ordered by their 2023 share (descending)",
+    x = "State",
+    y = "Share of Total Electricity",
+    fill = "Year"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+
+popup_data <- analysis_q2 %>%
+  # Select only the columns we need
+  select(State_abb, Year, Share) %>%
+  # Pivot to a "wide" format
+  pivot_wider(
+    names_from = Year,
+    values_from = Share,
+    names_prefix = "Share_"
+  ) %>%
+  # Create the pop-up content using HTML tags
+  mutate(
+    Popup_Content = paste0(
+      "<strong>State: </strong>", State_abb, "<br><hr>",
+      "<strong>Clean Energy Share:</strong><br>",
+      "2023: ", percent(Share_2023, accuracy = 0.1), "<br>",
+      "2022: ", percent(Share_2022, accuracy = 0.1), "<br>",
+      "2021: ", percent(Share_2021, accuracy = 0.1)
+    )
+  )
+
+# Get the US states map data
+states_sf <- states(cb = TRUE) %>% 
+  st_transform(4326) # Use a standard projection for web maps
+
+# Join your energy data to the map shapes
+map_data <- states_sf %>%
+  left_join(popup_data, by = c("STUSPS" = "State_abb"))
+
+# Create the final interactive map!
+leaflet(map_data) %>%
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  setView(lng = -98.5, lat = 39.8, zoom = 4) %>%
+  addPolygons(
+    fillColor = "seagreen", # A nice green color for clean energy
+    weight = 1,
+    color = "white",
+    fillOpacity = 0.7,
+    
+    # Add a highlight effect when you hover over a state
+    highlightOptions = highlightOptions(
+      weight = 3,
+      color = "black",
+      bringToFront = TRUE
+    ),
+    
+    # Use the 'Popup_Content' column we created for the pop-up text
+    popup = ~Popup_Content
+  )
+
+```
+
+### Are EV registrations concentrated in states with cleaner energy mixes
+```{r}
+q3 <- full_join(cleaned_ev_registrations, analysis_q2, by="State_abb" ) |>
+  select(State_abb, EV_count = count, Year, Share) |>
+  group_by(State_abb) |>
+  mutate(avg_share = sum(Share)/n()) |>
+  ungroup() |>
+  filter(Year == 2021) |>
+  select(c(-3, -4)) |>
+  mutate(EV_count = as.numeric(EV_count))
+
+head(q3)
+
+
+p <- ggplot(q3, aes(x = EV_count, y = avg_share, text = State_abb)) +
+  geom_point(alpha = 0.7, color = "dodgerblue") +
+  labs(
+    title = "EV Count vs. Clean Energy Share by State",
+    x = "Number of Electric Vehicles Registered",
+    y = "Average Share of Clean Energy"
+  ) +
+  theme_minimal()
+
+# 2. Convert the ggplot object into an interactive plot
+# The 'tooltip' argument tells plotly which aesthetic to display on hover
+ggplotly(p, tooltip = "text")
+
+q3_noCA <- q3 |>
+  filter(State_abb != "CA")
+head(q3_noCA)
+
+p_noCA <- ggplot(q3_noCA, aes(x = EV_count, y = avg_share, text = State_abb)) +
+  geom_point(alpha = 0.7, color = "dodgerblue") +
+  labs(
+    title = "EV Count vs. Clean Energy Share by State",
+    x = "Number of Electric Vehicles Registered",
+    y = "Average Share of Clean Energy"
+  ) +
+  theme_minimal()
+
+# 2. Convert the ggplot object into an interactive plot
+# The 'tooltip' argument tells plotly which aesthetic to display on hover
+ggplotly(p_noCA, tooltip = "text")
+
+
+
+q3_contigency <- q3 |>
+  mutate(
+    # Group EV counts into 4 bins (quartiles)
+    ev_category = ntile(EV_count, 4),
+    
+    # Group clean energy shares into 4 bins (quartiles)
+    share_category = ntile(avg_share, 4)
+  ) %>%
+  # Convert the numeric bins into descriptive factor labels
+  mutate(
+    ev_category = factor(ev_category, labels = c("Low", "Med-Low", "Med-High", "High")),
+    share_category = factor(share_category, labels = c("Low", "Med-Low", "Med-High", "High"))
+  )
+
+head(df_categorical)
+
+
+# 1. Fit the simple linear regression model
+# The formula avg_share ~ EV_count reads "avg_share is predicted by EV_count"
+model <- lm(avg_share ~ EV_count, data = q3)
+
+# 2. Get the full summary of the model's results
+summary(model)
+
+cor.test(q3$avg_share, q3$EV_count)
+```
+
+
+
+
+
+
+
+
+
+
+
 

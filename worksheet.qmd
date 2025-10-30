@@ -26,24 +26,35 @@ a.  Use str_detect() to identify all energy sources that contain the substring "
 
 ```{r}
 
+str_detect(energy_sources, "Wind|Hydro")
+
 ```
 
 b.  Extract the unit type (e.g., MWh, GWh, kWh) using str_extract(). Make sure your pattern handles extra spaces or hyphens.
 
 ```{r}
-
+units <- str_extract(energy_sources, "[kMGT]Wh")
+units
 ```
 
 c.  Clean the names to keep only the energy source name, trimming whitespace and removing parentheses.
 
 ```{r}
 
+sources <- str_replace_all(energy_sources, "\\s*\\(.*\\)", "")
+sources
+
+
 ```
 
 d.  Create a clean tibble called energy_clean with two columns: source and unit.
 
 ```{r}
-
+energy_clean <- tibble(
+  source = sources,
+  unit = units
+)
+print(energy_clean)
 ```
 
 e.  Discussion: Why might regex cleaning be important before performing joins or aggregations?\
@@ -76,12 +87,18 @@ states
 a.  Perform a left join to combine socioeconomic and regional data.
 
 ```{r}
+left_join(states, regions)
 
 ```
 
 b.  Perform an inner join. How many rows remain, and why is it the same or different?
 
 ```{r}
+inner <- inner_join(states, regions)
+dim(inner)
+dim(states)
+dim(regions)
+
 
 ```
 
@@ -89,15 +106,23 @@ b.  Perform an inner join. How many rows remain, and why is it the same or diffe
 c.  Perform an anti join to check if any state names don’t match between datasets. What might cause mismatches like this in real projects?
 
 ```{r}
-
+anti_join(states, regions)
 ```
 
 d.  Discussion: Why would you prefer a left join over an inner join when merging state-level datasets?\
+Because I want to keep the number of rows the same as the state socioeconomic matrix. 
+Inner_join may bias the analysis. 
     \
 e. Use pivot_longer() to make the socioeconomic data longer.\
 
 ```{r}
-
+states_longer <- states |>
+  pivot_longer(
+    cols = c(Income, Population, Illiteracy),
+    names_to = "metric",
+    values_to = "value"
+  )
+head(states_longer)
 ```
 
 #### Q2.5.
@@ -121,19 +146,36 @@ sales
 a. Convert the dataset from wide (one column per month) to long (one row per month per store).
 
 ```{r}
+sales_longer <- sales |>
+  pivot_longer(
+    cols = Jan_Sales:Mar_Sales,
+    names_to = "Month",
+    values_to = "Sales"
+  )
 
+head(sales_longer)
 ```
 
 b. Clean month names by removing _Sales.
 
 ```{r}
+sales_longer <-
+sales_longer |>
+  mutate(Month = str_replace(Month, "_Sales", ""))
 
+head(sales_longer)
 ```
 
 c. Convert the long dataset back to wide, with one column per month.
 
 ```{r}
+sales_wider <- sales_longer |>
+  pivot_wider(
+    names_from = Month,
+    values_from = Sales
+  )
 
+head(sales_wider)
 ```
 
 #### Q3. Mapping
@@ -156,7 +198,8 @@ state_data <- states |>
 Use a join to combine the us_map with the state_data
 
 ```{r}
-us_map_joined <- ...
+us_map_joined <- left_join(us_map, state_data, by = c("region" = "state"))
+head(us_map_joined)
 ```
 
 Create a chloropleth map:
@@ -173,6 +216,12 @@ ggplot(us_map_joined, aes(long, lat, group = group, fill = Income)) +
 b.  Swap Income for Life Exp to visualize life expectancy instead. Try changing the color scale using scale_fill_gradient() or scale_fill_gradient2()
 
 ```{r}
+ggplot(us_map_joined, aes(long, lat, group = group, fill = Illiteracy)) +
+  geom_polygon(color = "white") +
+  coord_fixed(1.3) +
+  theme_minimal() +
+  scale_fill_gradient(low = "lightblue", high="darkgreen") +
+  labs(title = "Illiteracy by State")
 
 ```
 
